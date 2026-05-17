@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
 import { typography } from '../../theme/typography';
@@ -15,6 +15,26 @@ type NoteGroup = {
   title: string;
   tasks: Task[];
 };
+
+// Supabase's PostgrestError is a plain object — `String(e)` would render
+// "[object Object]". Same helper used by Brain Dump.
+function formatError(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'object' && e !== null) {
+    const obj = e as Record<string, unknown>;
+    const msg = obj.message ?? obj.error_description ?? obj.error;
+    if (typeof msg === 'string') {
+      const code = typeof obj.code === 'string' ? ` [${obj.code}]` : '';
+      return msg + code;
+    }
+    try {
+      return JSON.stringify(e);
+    } catch {
+      /* fall through */
+    }
+  }
+  return String(e);
+}
 
 export function TodoList() {
   const [inbox, setInbox] = useState<Task[]>([]);
@@ -113,25 +133,39 @@ export function TodoList() {
   };
 
   const handleAddInbox = async (content: string, meta: AddTaskMeta) => {
-    const created = await tasksRepo.create(content, {
-      dueDate: meta.dueDate,
-      isImportant: meta.isImportant,
-    });
-    setInbox((prev) => [...prev, created]);
+    try {
+      const created = await tasksRepo.create(content, {
+        dueDate: meta.dueDate,
+        isImportant: meta.isImportant,
+      });
+      setInbox((prev) => [...prev, created]);
+    } catch (e) {
+      const msg = formatError(e);
+      console.error('[tasks] add inbox failed:', e);
+      Alert.alert('Add task failed', msg);
+    }
   };
 
   const handleAddToGroup =
     (noteId: string) => async (content: string, meta: AddTaskMeta) => {
-      const created = await tasksRepo.create(content, {
-        noteId,
-        dueDate: meta.dueDate,
-        isImportant: meta.isImportant,
-      });
-      setGroups((prev) =>
-        prev.map((g) =>
-          g.noteId === noteId ? { ...g, tasks: [...g.tasks, created] } : g,
-        ),
-      );
+      try {
+        const created = await tasksRepo.create(content, {
+          noteId,
+          dueDate: meta.dueDate,
+          isImportant: meta.isImportant,
+        });
+        setGroups((prev) =>
+          prev.map((g) =>
+            g.noteId === noteId
+              ? { ...g, tasks: [...g.tasks, created] }
+              : g,
+          ),
+        );
+      } catch (e) {
+        const msg = formatError(e);
+        console.error('[tasks] add to group failed:', e);
+        Alert.alert('Add task failed', msg);
+      }
     };
 
   const totallyEmpty = inbox.length === 0 && groups.length === 0;

@@ -83,9 +83,24 @@ export function TodoSection({
         />
       ))}
       <View style={styles.addRow}>
-        <View style={styles.addCircle}>
-          <Plus size={12} color={colors.textMuted} strokeWidth={1.8} />
-        </View>
+        <Pressable
+          onPress={submit}
+          hitSlop={8}
+          disabled={!draft.trim()}
+          style={({ pressed }) => [
+            styles.addCircle,
+            draft.trim() && styles.addCircleReady,
+            pressed && { opacity: 0.6 },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Add task"
+        >
+          <Plus
+            size={12}
+            color={draft.trim() ? colors.text : colors.textMuted}
+            strokeWidth={1.8}
+          />
+        </Pressable>
         <TextInput
           value={draft}
           onChangeText={setDraft}
@@ -167,6 +182,10 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  addCircleReady: {
+    borderColor: colors.text,
+    borderStyle: 'solid',
   },
   addInput: {
     ...typography.input,
