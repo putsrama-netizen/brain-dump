@@ -7,13 +7,15 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { Check, Star, X } from 'lucide-react-native';
+import { X } from 'lucide-react-native';
 import { colors } from '../../theme/colors';
 import { typography } from '../../theme/typography';
 import { spacing } from '../../theme/spacing';
 import { haptics } from '../../hooks/useHaptics';
 import { withAlpha } from '../rituals/palette';
 import { dueLabel } from '../../lib/dueDate';
+import { ScribbleStar } from '../ui/ScribbleStar';
+import { ScribbledCheck } from '../ui/ScribbledCheck';
 import type { Task } from '../../db/schema';
 
 type Props = {
@@ -24,7 +26,7 @@ type Props = {
 };
 
 const CIRCLE = 22;
-const STAR = 18;
+const STAR = 20;
 
 export function TodoItem({
   task,
@@ -101,7 +103,13 @@ export function TodoItem({
   const isImportant = task.isImportant;
 
   return (
-    <Animated.View style={[styles.row, rowStyle]}>
+    <Animated.View
+      style={[
+        styles.row,
+        isImportant && styles.rowImportant,
+        rowStyle,
+      ]}
+    >
       <Pressable
         onPress={handleToggleStar}
         hitSlop={6}
@@ -114,12 +122,7 @@ export function TodoItem({
           isImportant ? 'Unmark important' : 'Mark important'
         }
       >
-        <Star
-          size={STAR}
-          color={isImportant ? colors.sandDeep : colors.divider}
-          fill={isImportant ? withAlpha(colors.sage, 0.9) : 'transparent'}
-          strokeWidth={1.5}
-        />
+        <ScribbleStar active={isImportant} size={STAR} />
       </Pressable>
       <Pressable
         onPress={handleToggle}
@@ -135,7 +138,7 @@ export function TodoItem({
             style={[styles.fill, fillStyle]}
           />
           <Animated.View style={[styles.check, checkStyle]}>
-            <Check size={14} color={colors.text} strokeWidth={2.4} />
+            <ScribbledCheck active={task.completed} size={15} />
           </Animated.View>
         </View>
       </Pressable>
@@ -181,6 +184,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xl,
     gap: spacing.sm,
+  },
+  rowImportant: {
+    backgroundColor: withAlpha(colors.sage, 0.14),
   },
   starPressArea: {
     alignItems: 'center',

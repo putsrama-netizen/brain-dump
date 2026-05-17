@@ -5,6 +5,7 @@ import { colors } from '../../theme/colors';
 import { typography } from '../../theme/typography';
 import { spacing } from '../../theme/spacing';
 import { TodoItem } from './TodoItem';
+import { HandDrawnUnderline } from '../ui/HandDrawnUnderline';
 import {
   dueDateForBucket,
   type DueBucket,
@@ -63,9 +64,14 @@ export function TodoSection({
   return (
     <View style={styles.section}>
       {title ? (
-        <Text style={styles.header} numberOfLines={2}>
-          {title}
-        </Text>
+        <View style={styles.headerWrap}>
+          <Text style={styles.header} numberOfLines={2}>
+            {title}
+          </Text>
+          <View style={styles.underline}>
+            <HandDrawnUnderline />
+          </View>
+        </View>
       ) : null}
       {tasks.map((task) => (
         <TodoItem
@@ -129,15 +135,21 @@ const styles = StyleSheet.create({
   section: {
     paddingVertical: spacing.sm,
   },
+  headerWrap: {
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
+    paddingHorizontal: spacing.xl,
+  },
   header: {
     ...typography.title,
     fontStyle: 'italic',
     fontSize: 18,
     lineHeight: 24,
     color: colors.text,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xs,
+  },
+  underline: {
+    marginTop: 2,
+    width: '60%',
   },
   addRow: {
     flexDirection: 'row',

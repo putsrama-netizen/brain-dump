@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   InputAccessoryView,
@@ -30,9 +30,13 @@ import { colors } from '../../src/theme/colors';
 import { typography } from '../../src/theme/typography';
 import { spacing, radius } from '../../src/theme/spacing';
 import { notesRepo } from '../../src/db/repositories/notes';
+import { promptsRepo } from '../../src/db/repositories/prompts';
+import { promptAnalyticsRepo } from '../../src/db/repositories/promptAnalytics';
 import { ensureAnonSession } from '../../src/lib/supabase';
+import { currentSlot } from '../../src/lib/timeSlot';
 import { haptics } from '../../src/hooks/useHaptics';
-import type { Note } from '../../src/db/schema';
+import { ResurfaceModal } from '../../src/components/resurface/ResurfaceModal';
+import type { Note, Prompt } from '../../src/db/schema';
 
 const INPUT_ACCESSORY_ID = 'voidKeyboardAccessory';
 
@@ -97,6 +101,14 @@ export default function VoidScreen() {
     null,
   );
 
+  // --- Prompt engine state ----------------------------------------------
+  const [currentPrompt, setCurrentPrompt] = useState<Prompt | null>(null);
+  const eligiblePool = useRef<Prompt[]>([]);
+  const sessionSkipped = useRef<Set<string>>(new Set());
+
+  // --- Resurfacing state -----------------------------------------------
+  const [resurfaceNote, setResurfaceNote] = useState<Note | null>(null);
+
   const binRef = useRef<BinIconHandle>(null);
   const binWrapRef = useRef<View>(null);
   const canvasRef = useRef<View>(null);
@@ -152,6 +164,65 @@ export default function VoidScreen() {
 
   const dismissKeyboard = useCallback(() => {
     Keyboard.dismiss();
+  }, []);
+
+  // Pick a random prompt from the in-memory pool, excluding any seen this
+  // session. Logs a 'shown' analytics row in the background.
+  const pickFromPool = useCallback(async () => {
+    const pool = eligiblePool.current.filter(
+      (p) => !sessionSkipped.current.has(p.id),
+    );
+    if (pool.length === 0) {
+      setCurrentPrompt(null);
+      return;
+    }
+    const next = pool[Math.floor(Math.random() * pool.length)];
+    setCurrentPrompt(next);
+    promptAnalyticsRepo.log(next.id, 'shown').catch(() => {});
+  }, []);
+
+  // Boot the prompt engine once per mount: slot → server pool → first pick.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const slot = currentSlot();
+        const [slotPrompts, shownIds] = await Promise.all([
+          promptsRepo.listBySlot(slot),
+          promptAnalyticsRepo.listShownPromptIds(7),
+        ]);
+        if (cancelled) return;
+        const shownSet = new Set(shownIds);
+        let eligible = slotPrompts.filter((p) => !shownSet.has(p.id));
+        // If everything in this slot has been seen recently, fall back to the
+        // whole slot rather than show nothing.
+        if (eligible.length === 0) eligible = slotPrompts;
+        eligiblePool.current = eligible;
+        await pickFromPool();
+      } catch (e) {
+        console.error('[prompts] boot:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pickFromPool]);
+
+  const handleNotThisOne = () => {
+    if (!currentPrompt) return;
+    haptics.tap();
+    sessionSkipped.current.add(currentPrompt.id);
+    promptAnalyticsRepo.log(currentPrompt.id, 'skipped').catch(() => {});
+    pickFromPool();
+  };
+
+  const triggerResurface = useCallback(async () => {
+    try {
+      const candidate = await notesRepo.pickResurfaceCandidate();
+      if (candidate) setResurfaceNote(candidate);
+    } catch (e) {
+      console.error('[resurface] pick:', e);
+    }
   }, []);
 
   const runTossAnim = (dx: number, dy: number, onDone: () => void) => {
@@ -255,6 +326,15 @@ export default function VoidScreen() {
       resetAnim();
       setResetKey((k) => k + 1);
       setAnimating(false);
+      // Log prompt engagement + advance to a fresh one for the next dump.
+      if (currentPrompt) {
+        promptAnalyticsRepo
+          .log(currentPrompt.id, 'completed')
+          .catch(() => {});
+        sessionSkipped.current.add(currentPrompt.id);
+        pickFromPool();
+      }
+      triggerResurface();
     });
   };
 
@@ -282,7 +362,16 @@ export default function VoidScreen() {
           ),
         ),
       ]);
-      router.push('/(tabs)/dashboard');
+      // Log prompt engagement + advance to a fresh one for the next dump.
+      if (currentPrompt) {
+        promptAnalyticsRepo
+          .log(currentPrompt.id, 'completed')
+          .catch(() => {});
+        sessionSkipped.current.add(currentPrompt.id);
+        pickFromPool();
+      }
+      // After Keep, show the Resurfacing prompt instead of jumping tabs.
+      triggerResurface();
     } catch (e) {
       const msg = formatError(e);
       console.error('[keep] failed:', e);
@@ -333,7 +422,29 @@ export default function VoidScreen() {
             <View style={styles.flex}>
               <View style={styles.header}>
                 <Text style={styles.title}>Brain Dump</Text>
-                <Text style={styles.subtitle}>What&apos;s on your mind?</Text>
+                {currentPrompt ? (
+                  <View style={styles.promptRow}>
+                    <Text style={styles.promptText}>
+                      {currentPrompt.text}
+                    </Text>
+                    <Pressable
+                      onPress={handleNotThisOne}
+                      hitSlop={6}
+                      style={({ pressed }) => [
+                        styles.skipPromptBtn,
+                        pressed && { opacity: 0.6 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Skip this prompt"
+                    >
+                      <Text style={styles.skipPromptText}>not this one</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Text style={styles.subtitle}>
+                    What&apos;s on your mind?
+                  </Text>
+                )}
               </View>
 
               <View ref={canvasRef} style={styles.canvas} collapsable={false}>
@@ -404,6 +515,27 @@ export default function VoidScreen() {
         </KeyboardAvoidingView>
       </PaperGrain>
 
+      <ResurfaceModal
+        note={resurfaceNote}
+        onClose={() => setResurfaceNote(null)}
+        onToss={async (n) => {
+          setResurfaceNote(null);
+          try {
+            await notesRepo.hardDelete(n.id);
+          } catch (e) {
+            console.error('[resurface] toss:', e);
+          }
+        }}
+        onKeep={() => setResurfaceNote(null)}
+        onAddSteps={(n) => {
+          setResurfaceNote(null);
+          router.push({
+            pathname: '/(tabs)/dashboard',
+            params: { editNoteId: n.id },
+          });
+        }}
+      />
+
       {Platform.OS === 'ios' && (
         <InputAccessoryView nativeID={INPUT_ACCESSORY_ID}>
           <View style={styles.accessory}>
@@ -445,6 +577,32 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textMuted,
     marginTop: spacing.xs,
+  },
+  promptRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    marginTop: spacing.xs,
+  },
+  promptText: {
+    ...typography.title,
+    fontSize: 18,
+    lineHeight: 24,
+    fontStyle: 'italic',
+    color: colors.text,
+    flex: 1,
+  },
+  skipPromptBtn: {
+    paddingVertical: 2,
+    paddingHorizontal: 2,
+  },
+  skipPromptText: {
+    fontFamily: typography.body.fontFamily,
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    textDecorationLine: 'underline',
   },
   canvas: {
     flex: 1,

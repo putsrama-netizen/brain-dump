@@ -47,6 +47,21 @@ export const rituals = sqliteTable('rituals', {
   createdAt: integer('created_at').notNull(),
 });
 
+export const prompts = sqliteTable('prompts', {
+  id: text('id').primaryKey(),
+  text: text('text').notNull(),
+  category: text('category').notNull(),
+  timeOfDay: text('time_of_day').notNull(),
+  createdAt: integer('created_at').notNull(),
+});
+
+export const promptAnalytics = sqliteTable('prompt_analytics', {
+  id: text('id').primaryKey(),
+  promptId: text('prompt_id').notNull(),
+  action: text('action').notNull(),
+  createdAt: integer('created_at').notNull(),
+});
+
 export const ritualCompletions = sqliteTable('ritual_completions', {
   id: text('id').primaryKey(),
   ritualId: text('ritual_id')
@@ -62,6 +77,8 @@ export type Task = typeof tasks.$inferSelect;
 export type Ritual = typeof rituals.$inferSelect;
 export type RitualCompletion = typeof ritualCompletions.$inferSelect;
 export type Group = typeof groups.$inferSelect;
+export type Prompt = typeof prompts.$inferSelect;
+export type PromptAnalytics = typeof promptAnalytics.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
 export type NewNote = typeof notes.$inferInsert;
 export type NewTask = typeof tasks.$inferInsert;

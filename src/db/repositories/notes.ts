@@ -125,4 +125,53 @@ export const notesRepo = {
       .eq('id', id);
     if (error) throw error;
   },
+
+  /**
+   * Pick a single non-tossed note created exactly 3, 7, or 30 days ago.
+   * Days are tried in shuffled order; returns null if no eligible notes exist.
+   * Used by the Resurfacing flow after Keep/Toss on Brain Dump.
+   */
+  async pickResurfaceCandidate(): Promise<Note | null> {
+    const startOfToday = (() => {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    })();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const offsets = [3, 7, 30].sort(() => Math.random() - 0.5);
+    for (const offset of offsets) {
+      const dayStart = startOfToday - offset * dayMs;
+      const dayEnd = dayStart + dayMs;
+      const { data, error } = await supabase
+        .from(TABLE)
+        .select('*')
+        .is('tossed_at', null)
+        .gte('created_at', dayStart)
+        .lt('created_at', dayEnd)
+        .limit(20);
+      if (error) throw error;
+      if (data && data.length > 0) {
+        const pick = data[Math.floor(Math.random() * data.length)];
+        return camelRows<Note>([pick])[0];
+      }
+    }
+    return null;
+  },
+
+  /** Activity day-keys (local-tz start-of-day epoch ms) where a note was created. */
+  async listCreationActivityDays(days: number): Promise<Set<number>> {
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select('created_at')
+      .gte('created_at', cutoff);
+    if (error) throw error;
+    const dayKeys = new Set<number>();
+    for (const row of (data ?? []) as { created_at: number }[]) {
+      const d = new Date(row.created_at);
+      d.setHours(0, 0, 0, 0);
+      dayKeys.add(d.getTime());
+    }
+    return dayKeys;
+  },
 };

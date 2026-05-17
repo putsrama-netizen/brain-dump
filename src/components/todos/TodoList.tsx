@@ -8,6 +8,7 @@ import { tasksRepo } from '../../db/repositories/tasks';
 import { notesRepo } from '../../db/repositories/notes';
 import type { Task, Note } from '../../db/schema';
 import { TodoSection, type AddTaskMeta } from './TodoSection';
+import { HandDrawnUnderline } from '../ui/HandDrawnUnderline';
 
 type NoteGroup = {
   noteId: string;
@@ -137,7 +138,12 @@ export function TodoList() {
 
   return (
     <View style={styles.wrapper}>
-      <Text style={styles.sectionLabel}>To-do</Text>
+      <View style={styles.sectionLabelWrap}>
+        <Text style={styles.sectionLabel}>To-do</Text>
+        <View style={styles.sectionUnderline}>
+          <HandDrawnUnderline />
+        </View>
+      </View>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -179,13 +185,19 @@ const styles = StyleSheet.create({
   wrapper: {
     flex: 1,
   },
+  sectionLabelWrap: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
   sectionLabel: {
     ...typography.caption,
     color: colors.textMuted,
     textTransform: 'uppercase',
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
+  },
+  sectionUnderline: {
+    marginTop: 2,
+    width: 60,
   },
   scroll: {
     flex: 1,

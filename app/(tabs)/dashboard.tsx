@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -8,17 +8,21 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Plus } from 'lucide-react-native';
 import { colors } from '../../src/theme/colors';
 import { typography } from '../../src/theme/typography';
 import { spacing, radius } from '../../src/theme/spacing';
 import { PaperGrain } from '../../src/components/ui/PaperGrain';
+import { HandDrawnUnderline } from '../../src/components/ui/HandDrawnUnderline';
+import { ConsistencyGrid } from '../../src/components/dashboard/ConsistencyGrid';
 import { NoteCard } from '../../src/components/notes/NoteCard';
 import { NoteEditModal } from '../../src/components/notes/NoteEditModal';
 import { NewGroupModal } from '../../src/components/notes/NewGroupModal';
 import { notesRepo } from '../../src/db/repositories/notes';
 import { tasksRepo } from '../../src/db/repositories/tasks';
 import { groupsRepo } from '../../src/db/repositories/groups';
+import { promptAnalyticsRepo } from '../../src/db/repositories/promptAnalytics';
 import { haptics } from '../../src/hooks/useHaptics';
 import type { Group, Note } from '../../src/db/schema';
 
@@ -46,18 +50,31 @@ export default function DashboardScreen() {
   const [taskStats, setTaskStats] = useState<
     Map<string, { total: number; done: number }>
   >(new Map());
+  const [activityDays, setActivityDays] = useState<Set<number>>(new Set());
   const [editing, setEditing] = useState<Note | null>(null);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
 
+  // Brain Dump's Resurface modal can deep-link here with `editNoteId` to open
+  // the edit modal directly for a specific past note. Clear the param once
+  // consumed so a tab-switch doesn't re-trigger it.
+  const { editNoteId } = useLocalSearchParams<{ editNoteId?: string }>();
+  const router = useRouter();
+
   const reload = useCallback(async () => {
-    const [n, g, s] = await Promise.all([
+    const [n, g, s, noteDays, completedDays] = await Promise.all([
       notesRepo.listActive(),
       groupsRepo.list(),
       tasksRepo.countsByNote(),
+      notesRepo.listCreationActivityDays(30),
+      promptAnalyticsRepo.listCompletedActivityDays(30),
     ]);
     setNotes(n);
     setGroups(g);
     setTaskStats(s);
+    const union = new Set<number>();
+    noteDays.forEach((d) => union.add(d));
+    completedDays.forEach((d) => union.add(d));
+    setActivityDays(union);
   }, []);
 
   // Pulls just the task counts, used after the edit modal closes so badges
@@ -76,6 +93,18 @@ export default function DashboardScreen() {
       reload();
     }, [reload]),
   );
+
+  // When Brain Dump deep-links here with editNoteId, open the matching note's
+  // edit modal once data is loaded. Clear the param afterward so re-focusing
+  // this tab later doesn't reopen the modal.
+  useEffect(() => {
+    if (!editNoteId || notes.length === 0) return;
+    const target = notes.find((n) => n.id === editNoteId);
+    if (target) {
+      setEditing(target);
+      router.setParams({ editNoteId: undefined });
+    }
+  }, [editNoteId, notes, router]);
 
   const handleTap = (note: Note) => {
     haptics.tap();
@@ -160,6 +189,8 @@ export default function DashboardScreen() {
           </Pressable>
         </View>
 
+        <ConsistencyGrid activityDays={activityDays} />
+
         {notes.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>Nothing kept yet.</Text>
@@ -175,7 +206,12 @@ export default function DashboardScreen() {
             {ungrouped.length > 0 && (
               <View style={styles.section}>
                 {grouped.length > 0 && (
-                  <Text style={styles.sectionHeader}>Unsorted</Text>
+                  <View style={styles.sectionHeaderWrap}>
+                    <Text style={styles.sectionHeader}>Unsorted</Text>
+                    <View style={styles.sectionUnderline}>
+                      <HandDrawnUnderline />
+                    </View>
+                  </View>
                 )}
                 <View style={styles.columns}>
                   <View style={styles.column}>
@@ -189,7 +225,12 @@ export default function DashboardScreen() {
             )}
             {grouped.map((section) => (
               <View key={section.group.id} style={styles.section}>
-                <Text style={styles.sectionHeader}>{section.group.name}</Text>
+                <View style={styles.sectionHeaderWrap}>
+                  <Text style={styles.sectionHeader}>{section.group.name}</Text>
+                  <View style={styles.sectionUnderline}>
+                    <HandDrawnUnderline />
+                  </View>
+                </View>
                 {renderColumns(section.notes)}
               </View>
             ))}
@@ -259,13 +300,19 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.lg,
   },
+  sectionHeaderWrap: {
+    paddingHorizontal: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
   sectionHeader: {
     ...typography.title,
     fontStyle: 'italic',
     fontSize: 18,
     color: colors.text,
-    paddingHorizontal: spacing.sm,
-    paddingBottom: spacing.sm,
+  },
+  sectionUnderline: {
+    marginTop: 2,
+    width: '40%',
   },
   columns: {
     flexDirection: 'row',
