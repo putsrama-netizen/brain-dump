@@ -32,7 +32,6 @@ import { spacing, radius } from '../../src/theme/spacing';
 import { notesRepo } from '../../src/db/repositories/notes';
 import { promptsRepo } from '../../src/db/repositories/prompts';
 import { promptAnalyticsRepo } from '../../src/db/repositories/promptAnalytics';
-import { ensureAnonSession } from '../../src/lib/supabase';
 import { currentSlot } from '../../src/lib/timeSlot';
 import { haptics } from '../../src/hooks/useHaptics';
 import { ResurfaceModal } from '../../src/components/resurface/ResurfaceModal';
@@ -350,7 +349,6 @@ export default function VoidScreen() {
     setResetKey((k) => k + 1);
 
     try {
-      await ensureAnonSession();
       // 10s timeout so a hung Supabase request becomes a visible error
       // rather than a silent freeze.
       await Promise.race([

@@ -1,7 +1,8 @@
 import 'react-native-url-polyfill/auto';
+import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type Session } from '@supabase/supabase-js';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -45,24 +46,66 @@ supabase.auth.onAuthStateChange((_event, session) => {
   cachedUserId = session?.user?.id ?? null;
 });
 
+// ---------------------------------------------------------------------------
+// Email + password auth. Supabase persists the session in AsyncStorage on RN
+// and localStorage on web automatically (configured above), so successful
+// sign-in survives reloads without any extra glue.
+// ---------------------------------------------------------------------------
+
 /**
- * Ensure the device has an anonymous session. Idempotent — returns the
- * existing session if one is already persisted.
+ * Returns { session: null } when Supabase has "Confirm email" turned on — the
+ * caller should show a "check your inbox" notice instead of expecting an
+ * auto-redirect.
  */
-export async function ensureAnonSession(): Promise<string> {
-  const existing = await supabase.auth.getSession();
-  if (existing.data.session) {
-    cachedUserId = existing.data.session.user.id;
-    return cachedUserId;
-  }
-  const { data, error } = await supabase.auth.signInAnonymously();
-  if (error || !data.user) {
-    throw new Error(
-      `Anonymous sign-in failed: ${error?.message ?? 'no user returned'}. Enable "Allow anonymous sign-ins" in Supabase → Authentication → Sign In / Up.`,
-    );
-  }
-  cachedUserId = data.user.id;
-  return cachedUserId;
+export async function signUpWithEmail(email: string, password: string) {
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+export async function signInWithEmail(email: string, password: string) {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function signOut(): Promise<void> {
+  cachedUserId = null;
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+}
+
+/**
+ * React hook that mirrors `supabase.auth.getSession()` + `onAuthStateChange`.
+ * Returns `'loading'` until the initial session fetch resolves; thereafter
+ * `null` (signed out) or a Session.
+ */
+export function useSession(): Session | null | 'loading' {
+  const [session, setSession] = useState<Session | null | 'loading'>('loading');
+  useEffect(() => {
+    let active = true;
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (active) setSession(data.session ?? null);
+      })
+      .catch(() => {
+        if (active) setSession(null);
+      });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, s) => {
+      if (active) setSession(s ?? null);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+  return session;
 }
 
 // ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ import { notesRepo } from '../../src/db/repositories/notes';
 import { tasksRepo } from '../../src/db/repositories/tasks';
 import { groupsRepo } from '../../src/db/repositories/groups';
 import { promptAnalyticsRepo } from '../../src/db/repositories/promptAnalytics';
+import { signOut } from '../../src/lib/supabase';
 import { haptics } from '../../src/hooks/useHaptics';
 import type { Group, Note } from '../../src/db/schema';
 
@@ -179,6 +180,22 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.headerActions}>
             <Pressable
+              onPress={() => {
+                signOut().catch((e) =>
+                  console.error('[dashboard] sign out:', e),
+                );
+              }}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.signOutBtn,
+                pressed && { opacity: 0.5 },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Sign out"
+            >
+              <Text style={styles.signOutText}>Sign out</Text>
+            </Pressable>
+            <Pressable
               onPress={() => setSweepModalOpen(true)}
               style={({ pressed }) => [
                 styles.sweepBtn,
@@ -332,6 +349,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textMuted,
     fontStyle: 'italic',
+  },
+  signOutBtn: {
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.sm,
+  },
+  signOutText: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    textDecorationLine: 'underline',
   },
   scrollContent: {
     paddingHorizontal: spacing.lg,

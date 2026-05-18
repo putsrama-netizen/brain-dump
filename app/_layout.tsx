@@ -1,9 +1,8 @@
 import 'react-native-gesture-handler';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import {
   Platform,
   StyleSheet,
-  Text,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -19,10 +18,10 @@ import {
   PlayfairDisplay_700Bold,
 } from '@expo-google-fonts/playfair-display';
 import * as SplashScreen from 'expo-splash-screen';
-import { ensureAnonSession } from '../src/lib/supabase';
+import { useSession } from '../src/lib/supabase';
 import { maybeImportLocalData } from '../src/lib/migrate';
+import { SignInScreen } from '../src/components/auth/SignInScreen';
 import { colors } from '../src/theme/colors';
-import { typography } from '../src/theme/typography';
 import { spacing } from '../src/theme/spacing';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -49,41 +48,43 @@ export default function RootLayout() {
     PlayfairDisplay_600SemiBold,
     PlayfairDisplay_700Bold,
   });
-  const [bootDone, setBootDone] = useState(false);
-  const [bootError, setBootError] = useState<string | null>(null);
+  const session = useSession();
 
+  // Run the one-shot SQLite→Supabase migration the first time a user is
+  // authenticated (any auth method). Idempotent via the AsyncStorage flag
+  // inside the function — repeated calls do nothing.
   useEffect(() => {
-    (async () => {
-      try {
-        await ensureAnonSession();
-        await maybeImportLocalData();
-        setBootDone(true);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setBootError(msg);
-        console.error('[bootstrap]', msg);
-      }
-    })();
-  }, []);
+    if (session && session !== 'loading') {
+      maybeImportLocalData().catch((e) => {
+        console.error('[migrate]', e);
+      });
+    }
+  }, [session]);
 
+  // Hide splash once both fonts and the initial session check are settled.
   useEffect(() => {
     const fontsReady = fontsLoaded || !!fontError;
-    const bootReady = bootDone || !!bootError;
-    if (fontsReady && bootReady) {
+    const authReady = session !== 'loading';
+    if (fontsReady && authReady) {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [fontsLoaded, fontError, bootDone, bootError]);
+  }, [fontsLoaded, fontError, session]);
 
-  if (bootError) {
+  if (!(fontsLoaded || fontError) || session === 'loading') return null;
+
+  // No session → render the sign-in screen full-frame, no Stack navigator.
+  if (!session) {
     return (
-      <View style={styles.errorScreen}>
-        <Text style={styles.errorTitle}>Brain Dump couldn&apos;t start.</Text>
-        <Text style={styles.errorBody}>{bootError}</Text>
-      </View>
+      <GestureHandlerRootView style={styles.root}>
+        <SafeAreaProvider>
+          <StatusBar style="dark" />
+          <PhoneFrame>
+            <SignInScreen />
+          </PhoneFrame>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   }
-
-  if (!(fontsLoaded || fontError) || !bootDone) return null;
 
   return (
     <GestureHandlerRootView style={styles.root}>
@@ -138,23 +139,5 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 24,
-  },
-  errorScreen: {
-    flex: 1,
-    backgroundColor: colors.paper,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xl,
-    gap: spacing.md,
-  },
-  errorTitle: {
-    ...typography.title,
-    color: colors.text,
-    textAlign: 'center',
-  },
-  errorBody: {
-    ...typography.body,
-    color: colors.textMuted,
-    textAlign: 'center',
   },
 });
