@@ -158,6 +158,38 @@ export const notesRepo = {
     return null;
   },
 
+  /**
+   * Soft-sweep all active notes older than `days` days. Uses the existing
+   * `tossed_at` column so swept notes naturally drop out of `listActive()` —
+   * no new schema needed. Returns the count of rows updated so the UI can
+   * tell the user "swept N notes."
+   */
+  async sweepOlderThan(days: number): Promise<number> {
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const userId = await requireUserId();
+    const { data, error } = await supabase
+      .from(TABLE)
+      .update({ tossed_at: Date.now(), updated_at: Date.now() })
+      .eq('user_id', userId)
+      .is('tossed_at', null)
+      .lt('created_at', cutoff)
+      .select('id');
+    if (error) throw error;
+    return data?.length ?? 0;
+  },
+
+  /** Counts active notes older than `days` days. Drives the confirmation modal's "N notes" hint. */
+  async countOlderThan(days: number): Promise<number> {
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const { count, error } = await supabase
+      .from(TABLE)
+      .select('id', { count: 'exact', head: true })
+      .is('tossed_at', null)
+      .lt('created_at', cutoff);
+    if (error) throw error;
+    return count ?? 0;
+  },
+
   /** Activity day-keys (local-tz start-of-day epoch ms) where a note was created. */
   async listCreationActivityDays(days: number): Promise<Set<number>> {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;

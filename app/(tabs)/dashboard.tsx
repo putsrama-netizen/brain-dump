@@ -9,7 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Plus } from 'lucide-react-native';
+import { Plus, Wind } from 'lucide-react-native';
 import { colors } from '../../src/theme/colors';
 import { typography } from '../../src/theme/typography';
 import { spacing, radius } from '../../src/theme/spacing';
@@ -19,6 +19,7 @@ import { ConsistencyGrid } from '../../src/components/dashboard/ConsistencyGrid'
 import { NoteCard } from '../../src/components/notes/NoteCard';
 import { NoteEditModal } from '../../src/components/notes/NoteEditModal';
 import { NewGroupModal } from '../../src/components/notes/NewGroupModal';
+import { SweepModal } from '../../src/components/notes/SweepModal';
 import { notesRepo } from '../../src/db/repositories/notes';
 import { tasksRepo } from '../../src/db/repositories/tasks';
 import { groupsRepo } from '../../src/db/repositories/groups';
@@ -53,6 +54,7 @@ export default function DashboardScreen() {
   const [activityDays, setActivityDays] = useState<Set<number>>(new Set());
   const [editing, setEditing] = useState<Note | null>(null);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [sweepModalOpen, setSweepModalOpen] = useState(false);
 
   // Brain Dump's Resurface modal can deep-link here with `editNoteId` to open
   // the edit modal directly for a specific past note. Clear the param once
@@ -175,18 +177,32 @@ export default function DashboardScreen() {
             <Text style={styles.title}>Dashboard</Text>
             <Text style={styles.subtitle}>Your kept thoughts.</Text>
           </View>
-          <Pressable
-            onPress={() => setGroupModalOpen(true)}
-            style={({ pressed }) => [
-              styles.newGroupBtn,
-              pressed && styles.newGroupBtnPressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="New group"
-          >
-            <Plus size={14} color={colors.text} strokeWidth={1.8} />
-            <Text style={styles.newGroupText}>New Group</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              onPress={() => setSweepModalOpen(true)}
+              style={({ pressed }) => [
+                styles.sweepBtn,
+                pressed && styles.sweepBtnPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Sweep older notes"
+            >
+              <Wind size={14} color={colors.textMuted} strokeWidth={1.6} />
+              <Text style={styles.sweepText}>Sweep</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setGroupModalOpen(true)}
+              style={({ pressed }) => [
+                styles.newGroupBtn,
+                pressed && styles.newGroupBtnPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="New group"
+            >
+              <Plus size={14} color={colors.text} strokeWidth={1.8} />
+              <Text style={styles.newGroupText}>New Group</Text>
+            </Pressable>
+          </View>
         </View>
 
         <ConsistencyGrid activityDays={activityDays} />
@@ -251,6 +267,13 @@ export default function DashboardScreen() {
         onClose={() => setGroupModalOpen(false)}
         onCreate={handleCreateGroup}
       />
+      <SweepModal
+        visible={sweepModalOpen}
+        onClose={() => setSweepModalOpen(false)}
+        onSwept={(count) => {
+          if (count > 0) reload();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -290,6 +313,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: colors.text,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  sweepBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  sweepBtnPressed: { opacity: 0.55 },
+  sweepText: {
+    ...typography.body,
+    fontSize: 13,
+    color: colors.textMuted,
+    fontStyle: 'italic',
   },
   scrollContent: {
     paddingHorizontal: spacing.lg,

@@ -164,7 +164,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.divider,
     padding: spacing.base,
-    paddingRight: spacing.lg + spacing.sm,
+    // X delete badge is absolutely-positioned, so we only need enough
+    // right-padding for text to clear its bounding box, not the badge plus a buffer.
+    paddingRight: spacing.lg,
     ...shadows.soft,
   },
   cardPressed: {
