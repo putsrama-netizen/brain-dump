@@ -15,6 +15,8 @@ import {
 import { useRouter } from 'expo-router';
 import Animated, {
   Easing,
+  FadeInDown,
+  FadeOut,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -26,6 +28,7 @@ import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { UndoToast } from '../../src/components/animations/UndoToast';
 import { BinIcon, type BinIconHandle } from '../../src/components/ui/BinIcon';
 import { PaperGrain } from '../../src/components/ui/PaperGrain';
+import { HandDrawnUnderline } from '../../src/components/ui/HandDrawnUnderline';
 import { colors } from '../../src/theme/colors';
 import { typography } from '../../src/theme/typography';
 import { spacing, radius } from '../../src/theme/spacing';
@@ -38,6 +41,26 @@ import { ResurfaceModal } from '../../src/components/resurface/ResurfaceModal';
 import type { Note, Prompt } from '../../src/db/schema';
 
 const INPUT_ACCESSORY_ID = 'voidKeyboardAccessory';
+
+// Local fallback pool. Used when the server returns 0 prompts for the current
+// slot (e.g. seed SQL never ran on this Supabase project). Keeps the input
+// area from feeling sterile while we surface a diagnostic.
+const FALLBACK_PROMPTS: { id: string; text: string }[] = [
+  { id: '_fallback_a', text: "What's loud right now?" },
+  { id: '_fallback_b', text: 'Anything sitting on your chest?' },
+  { id: '_fallback_c', text: 'What can you let go of today?' },
+  { id: '_fallback_d', text: "What's the smallest thing you'd feel better having handled?" },
+  { id: '_fallback_e', text: 'What stayed with you today?' },
+];
+
+function pickFallbackPrompt(excludeIds: Set<string>): {
+  id: string;
+  text: string;
+} {
+  const pool = FALLBACK_PROMPTS.filter((p) => !excludeIds.has(p.id));
+  const arr = pool.length > 0 ? pool : FALLBACK_PROMPTS;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 
 // Supabase's PostgrestError is a plain object (not an Error subclass), so
 // `e instanceof Error` is false and `String(e)` returns "[object Object]".
@@ -101,7 +124,15 @@ export default function VoidScreen() {
   );
 
   // --- Prompt engine state ----------------------------------------------
-  const [currentPrompt, setCurrentPrompt] = useState<Prompt | null>(null);
+  // currentPrompt holds either a real Prompt row OR a tagged fallback object.
+  // Both expose `id` + `text`; only real prompts can be logged to analytics.
+  // The screen stays clean until the user pulls a prompt via the "(stuck?)"
+  // button — see promptRevealed.
+  const [currentPrompt, setCurrentPrompt] = useState<
+    Prompt | { id: string; text: string } | null
+  >(null);
+  const [promptRevealed, setPromptRevealed] = useState(false);
+  const [promptDiagnostic, setPromptDiagnostic] = useState<string | null>(null);
   const eligiblePool = useRef<Prompt[]>([]);
   const sessionSkipped = useRef<Set<string>>(new Set());
 
@@ -167,12 +198,14 @@ export default function VoidScreen() {
 
   // Pick a random prompt from the in-memory pool, excluding any seen this
   // session. Logs a 'shown' analytics row in the background.
-  const pickFromPool = useCallback(async () => {
+  const pickFromPool = useCallback(() => {
     const pool = eligiblePool.current.filter(
       (p) => !sessionSkipped.current.has(p.id),
     );
     if (pool.length === 0) {
-      setCurrentPrompt(null);
+      // Pool is exhausted (or never loaded) — fall back to the local list
+      // so the prompt area is never blank.
+      setCurrentPrompt(pickFallbackPrompt(sessionSkipped.current));
       return;
     }
     const next = pool[Math.floor(Math.random() * pool.length)];
@@ -180,12 +213,14 @@ export default function VoidScreen() {
     promptAnalyticsRepo.log(next.id, 'shown').catch(() => {});
   }, []);
 
-  // Boot the prompt engine once per mount: slot → server pool → first pick.
+  // Boot: silently warm the prompt pool so the first reveal feels instant.
+  // We do NOT pick or display a prompt on mount — the screen stays clean
+  // until the user actively pulls one via "(stuck?)".
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const slot = currentSlot();
       try {
-        const slot = currentSlot();
         const [slotPrompts, shownIds] = await Promise.all([
           promptsRepo.listBySlot(slot),
           promptAnalyticsRepo.listShownPromptIds(7),
@@ -193,25 +228,45 @@ export default function VoidScreen() {
         if (cancelled) return;
         const shownSet = new Set(shownIds);
         let eligible = slotPrompts.filter((p) => !shownSet.has(p.id));
-        // If everything in this slot has been seen recently, fall back to the
-        // whole slot rather than show nothing.
         if (eligible.length === 0) eligible = slotPrompts;
         eligiblePool.current = eligible;
-        await pickFromPool();
+        if (eligible.length === 0) {
+          // DB returned zero prompts — surface a diagnostic so the user
+          // knows the seed SQL hasn't been run. Fallback pool still works.
+          setPromptDiagnostic(
+            `No prompts found in Supabase for slot "${slot}". Run supabase/prompts.sql.`,
+          );
+          return;
+        }
+        setPromptDiagnostic(null);
       } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
         console.error('[prompts] boot:', e);
+        setPromptDiagnostic(`Couldn't load prompts (${msg}).`);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [pickFromPool]);
+  }, []);
+
+  // First reveal: pull a prompt and show it with the fade-in animation.
+  const handleRevealPrompt = () => {
+    haptics.tap();
+    pickFromPool();
+    setPromptRevealed(true);
+  };
 
   const handleNotThisOne = () => {
     if (!currentPrompt) return;
     haptics.tap();
     sessionSkipped.current.add(currentPrompt.id);
-    promptAnalyticsRepo.log(currentPrompt.id, 'skipped').catch(() => {});
+    if (!currentPrompt.id.startsWith('_fallback')) {
+      promptAnalyticsRepo
+        .log(currentPrompt.id, 'skipped')
+        .catch(() => {});
+    }
     pickFromPool();
   };
 
@@ -325,14 +380,17 @@ export default function VoidScreen() {
       resetAnim();
       setResetKey((k) => k + 1);
       setAnimating(false);
-      // Log prompt engagement + advance to a fresh one for the next dump.
+      // Log prompt engagement (if any), then collapse back to clean slate.
       if (currentPrompt) {
-        promptAnalyticsRepo
-          .log(currentPrompt.id, 'completed')
-          .catch(() => {});
+        if (!currentPrompt.id.startsWith('_fallback')) {
+          promptAnalyticsRepo
+            .log(currentPrompt.id, 'completed')
+            .catch(() => {});
+        }
         sessionSkipped.current.add(currentPrompt.id);
-        pickFromPool();
       }
+      setCurrentPrompt(null);
+      setPromptRevealed(false);
       triggerResurface();
     });
   };
@@ -360,15 +418,20 @@ export default function VoidScreen() {
           ),
         ),
       ]);
-      // Log prompt engagement + advance to a fresh one for the next dump.
+      // Log prompt engagement (if any), then collapse back to clean slate.
       if (currentPrompt) {
-        promptAnalyticsRepo
-          .log(currentPrompt.id, 'completed')
-          .catch(() => {});
+        if (!currentPrompt.id.startsWith('_fallback')) {
+          promptAnalyticsRepo
+            .log(currentPrompt.id, 'completed')
+            .catch(() => {});
+        }
         sessionSkipped.current.add(currentPrompt.id);
-        pickFromPool();
       }
-      // After Keep, show the Resurfacing prompt instead of jumping tabs.
+      setCurrentPrompt(null);
+      setPromptRevealed(false);
+      // Navigate to Dashboard so the user sees their kept scrap of paper;
+      // the Resurfacing modal overlays on top regardless of which tab is active.
+      router.push('/(tabs)/dashboard');
       triggerResurface();
     } catch (e) {
       const msg = formatError(e);
@@ -420,29 +483,28 @@ export default function VoidScreen() {
             <View style={styles.flex}>
               <View style={styles.header}>
                 <Text style={styles.title}>Brain Dump</Text>
-                {currentPrompt ? (
-                  <View style={styles.promptRow}>
+                {promptRevealed && currentPrompt ? (
+                  <Animated.View
+                    entering={FadeInDown.duration(300)}
+                    exiting={FadeOut.duration(200)}
+                  >
                     <Text style={styles.promptText}>
                       {currentPrompt.text}
                     </Text>
-                    <Pressable
-                      onPress={handleNotThisOne}
-                      hitSlop={6}
-                      style={({ pressed }) => [
-                        styles.skipPromptBtn,
-                        pressed && { opacity: 0.6 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Skip this prompt"
-                    >
-                      <Text style={styles.skipPromptText}>not this one</Text>
-                    </Pressable>
-                  </View>
+                    <View style={styles.promptUnderline}>
+                      <HandDrawnUnderline />
+                    </View>
+                  </Animated.View>
                 ) : (
                   <Text style={styles.subtitle}>
                     What&apos;s on your mind?
                   </Text>
                 )}
+                {promptDiagnostic ? (
+                  <Text style={styles.promptDiagnostic}>
+                    {promptDiagnostic}
+                  </Text>
+                ) : null}
               </View>
 
               <View ref={canvasRef} style={styles.canvas} collapsable={false}>
@@ -466,6 +528,34 @@ export default function VoidScreen() {
                   />
                 </Animated.View>
               </View>
+
+              {/* Pull-based prompt trigger. Hidden once the user has text in
+                  the input pre-reveal (workspace stays distraction-free).
+                  Once the prompt is revealed, the same button cycles it. */}
+              {promptRevealed || text.trim().length === 0 ? (
+                <View style={styles.stuckRow}>
+                  <Pressable
+                    onPress={
+                      promptRevealed ? handleNotThisOne : handleRevealPrompt
+                    }
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.stuckBtn,
+                      pressed && { opacity: 0.6 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      promptRevealed
+                        ? 'Try a different prompt'
+                        : 'Show me a prompt'
+                    }
+                  >
+                    <Text style={styles.stuckText}>
+                      {promptRevealed ? '(not this one)' : '(stuck?)'}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
 
               <View style={styles.footer}>
                 <Pressable
@@ -576,31 +666,40 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.xs,
   },
-  promptRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-    marginTop: spacing.xs,
-  },
   promptText: {
     ...typography.title,
     fontSize: 18,
     lineHeight: 24,
     fontStyle: 'italic',
     color: colors.text,
-    flex: 1,
+    marginTop: spacing.xs,
   },
-  skipPromptBtn: {
+  promptUnderline: {
+    width: '100%',
+    marginTop: spacing.xs,
+  },
+  stuckRow: {
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.xl,
+  },
+  stuckBtn: {
     paddingVertical: 2,
-    paddingHorizontal: 2,
+    paddingHorizontal: 4,
   },
-  skipPromptText: {
+  stuckText: {
     fontFamily: typography.body.fontFamily,
     fontSize: 12,
-    color: colors.textMuted,
+    color: '#757575',
     fontStyle: 'italic',
     textDecorationLine: 'underline',
+  },
+  promptDiagnostic: {
+    fontFamily: typography.body.fontFamily,
+    fontSize: 11,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    marginTop: spacing.xs,
   },
   canvas: {
     flex: 1,
