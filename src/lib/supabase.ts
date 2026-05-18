@@ -56,9 +56,24 @@ supabase.auth.onAuthStateChange((_event, session) => {
  * Returns { session: null } when Supabase has "Confirm email" turned on — the
  * caller should show a "check your inbox" notice instead of expecting an
  * auto-redirect.
+ *
+ * We explicitly set `emailRedirectTo` to the current web origin so the
+ * confirmation link in the email lands back on whatever environment the user
+ * actually signed up from (live Vercel URL, localhost dev, preview deploy)
+ * rather than depending on the dashboard's static Site URL.
  */
 export async function signUpWithEmail(email: string, password: string) {
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const emailRedirectTo =
+    Platform.OS === 'web' &&
+    typeof window !== 'undefined' &&
+    window.location?.origin
+      ? window.location.origin
+      : undefined;
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    ...(emailRedirectTo ? { options: { emailRedirectTo } } : {}),
+  });
   if (error) throw error;
   return data;
 }
