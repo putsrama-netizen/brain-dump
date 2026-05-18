@@ -26,6 +26,8 @@ type Props = {
   onDelete: (id: string) => void;
   onToggleImportant: (id: string) => void;
   onAdd: (content: string, meta: AddTaskMeta) => void;
+  // For inbox bucket sub-sections: render the items only, no add input row.
+  hideAdder?: boolean;
 };
 
 const CIRCLE = 18;
@@ -44,6 +46,7 @@ export function TodoSection({
   onDelete,
   onToggleImportant,
   onAdd,
+  hideAdder = false,
 }: Props) {
   const [draft, setDraft] = useState('');
   const [bucket, setBucket] = useState<DueBucket | null>(null);
@@ -82,6 +85,8 @@ export function TodoSection({
           onToggleImportant={onToggleImportant}
         />
       ))}
+      {hideAdder ? null : (
+      <>
       <View style={styles.addRow}>
         <Pressable
           onPress={submit}
@@ -142,6 +147,8 @@ export function TodoSection({
           })}
         </View>
       ) : null}
+      </>
+      )}
     </View>
   );
 }

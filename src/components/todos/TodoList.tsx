@@ -9,6 +9,11 @@ import { notesRepo } from '../../db/repositories/notes';
 import type { Task, Note } from '../../db/schema';
 import { TodoSection, type AddTaskMeta } from './TodoSection';
 import { HandDrawnUnderline } from '../ui/HandDrawnUnderline';
+import {
+  bucketForDueDate,
+  bucketLabel,
+  type DueBucket,
+} from '../../lib/dueDate';
 
 type NoteGroup = {
   noteId: string;
@@ -39,6 +44,7 @@ function formatError(e: unknown): string {
 export function TodoList() {
   const [inbox, setInbox] = useState<Task[]>([]);
   const [groups, setGroups] = useState<NoteGroup[]>([]);
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     const allTasks = await tasksRepo.list();
@@ -132,7 +138,15 @@ export function TodoList() {
     }
   };
 
+  const surfaceError = useCallback((label: string, e: unknown) => {
+    const msg = formatError(e);
+    console.error(`[tasks] ${label}:`, e);
+    setErrorBanner(`${label}: ${msg}`);
+    Alert.alert('Add task failed', msg);
+  }, []);
+
   const handleAddInbox = async (content: string, meta: AddTaskMeta) => {
+    setErrorBanner(null);
     try {
       const created = await tasksRepo.create(content, {
         dueDate: meta.dueDate,
@@ -140,14 +154,13 @@ export function TodoList() {
       });
       setInbox((prev) => [...prev, created]);
     } catch (e) {
-      const msg = formatError(e);
-      console.error('[tasks] add inbox failed:', e);
-      Alert.alert('Add task failed', msg);
+      surfaceError('add inbox failed', e);
     }
   };
 
   const handleAddToGroup =
     (noteId: string) => async (content: string, meta: AddTaskMeta) => {
+      setErrorBanner(null);
       try {
         const created = await tasksRepo.create(content, {
           noteId,
@@ -162,9 +175,7 @@ export function TodoList() {
           ),
         );
       } catch (e) {
-        const msg = formatError(e);
-        console.error('[tasks] add to group failed:', e);
-        Alert.alert('Add task failed', msg);
+        surfaceError('add to group failed', e);
       }
     };
 
@@ -178,6 +189,20 @@ export function TodoList() {
           <HandDrawnUnderline />
         </View>
       </View>
+      {errorBanner ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorTitle}>Couldn&apos;t save task</Text>
+          <Text style={styles.errorBody} selectable>
+            {errorBanner}
+          </Text>
+          <Text
+            style={styles.errorDismiss}
+            onPress={() => setErrorBanner(null)}
+          >
+            Dismiss
+          </Text>
+        </View>
+      ) : null}
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -189,15 +214,44 @@ export function TodoList() {
             Nothing yet. Add the first thing below.
           </Text>
         ) : null}
+        {/* Single add row at the top of the inbox; the picker on this row
+            decides which bucket the new task falls into. */}
         <TodoSection
           title={null}
           placeholder="Add a task"
-          tasks={inbox}
+          tasks={[]}
           onToggle={handleToggle}
           onDelete={handleDelete}
           onToggleImportant={handleToggleImportant}
           onAdd={handleAddInbox}
         />
+        {/* Inbox tasks grouped by their due bucket. Empty buckets are hidden. */}
+        {([
+          'today',
+          'tomorrow',
+          'someday',
+          null,
+        ] as (DueBucket | null)[])
+          .map((bucket) => ({
+            bucket,
+            tasks: inbox.filter(
+              (t) => bucketForDueDate(t.dueDate) === bucket,
+            ),
+          }))
+          .filter(({ tasks }) => tasks.length > 0)
+          .map(({ bucket, tasks }) => (
+            <TodoSection
+              key={bucket ?? 'anytime'}
+              title={bucketLabel(bucket)}
+              placeholder=""
+              tasks={tasks}
+              onToggle={handleToggle}
+              onDelete={handleDelete}
+              onToggleImportant={handleToggleImportant}
+              onAdd={() => {}}
+              hideAdder
+            />
+          ))}
         {groups.map((g) => (
           <TodoSection
             key={g.noteId}
@@ -232,6 +286,37 @@ const styles = StyleSheet.create({
   sectionUnderline: {
     marginTop: 2,
     width: 60,
+  },
+  errorBanner: {
+    marginHorizontal: spacing.xl,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#C97C1F',
+    backgroundColor: '#FFF6D0',
+    gap: 4,
+  },
+  errorTitle: {
+    fontFamily: typography.body.fontFamily,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#7A4A00',
+  },
+  errorBody: {
+    fontFamily: 'Menlo',
+    fontSize: 11,
+    color: '#7A4A00',
+    lineHeight: 16,
+  },
+  errorDismiss: {
+    fontFamily: typography.body.fontFamily,
+    fontSize: 12,
+    color: '#7A4A00',
+    fontStyle: 'italic',
+    textDecorationLine: 'underline',
+    marginTop: 4,
   },
   scroll: {
     flex: 1,
