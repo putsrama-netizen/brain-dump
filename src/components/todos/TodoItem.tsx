@@ -35,6 +35,14 @@ export function TodoItem({
   onToggleImportant,
 }: Props) {
   const [deleting, setDeleting] = useState(false);
+  // Local "visual completed" state. Flips immediately on tap so the
+  // strikethrough animation plays in place; the parent is notified after a
+  // short delay so re-bucketing into the Completed section doesn't snap the
+  // task mid-animation. Synced back to the prop on external changes.
+  const [visualCompleted, setVisualCompleted] = useState(task.completed);
+  useEffect(() => {
+    setVisualCompleted(task.completed);
+  }, [task.completed]);
 
   const fillOpacity = useSharedValue(task.completed ? 1 : 0);
   const fillScale = useSharedValue(task.completed ? 1 : 0.4);
@@ -44,7 +52,7 @@ export function TodoItem({
 
   useEffect(() => {
     if (deleting) return;
-    const done = task.completed;
+    const done = visualCompleted;
     fillOpacity.value = withTiming(done ? 1 : 0, { duration: 240 });
     fillScale.value = withTiming(done ? 1 : 0.4, {
       duration: 280,
@@ -53,7 +61,7 @@ export function TodoItem({
     checkOpacity.value = withTiming(done ? 1 : 0, { duration: 220 });
     rowOpacity.value = withTiming(done ? 0.5 : 1, { duration: 220 });
   }, [
-    task.completed,
+    visualCompleted,
     deleting,
     fillOpacity,
     fillScale,
@@ -76,7 +84,11 @@ export function TodoItem({
   const handleToggle = () => {
     if (deleting) return;
     haptics.tap();
-    onToggle(task.id);
+    // Flip visual instantly so the strikethrough + opacity animation runs
+    // in place. Delay the parent onToggle by ~250ms so re-bucketing into the
+    // Completed section happens after the user sees the check fill.
+    setVisualCompleted((prev) => !prev);
+    setTimeout(() => onToggle(task.id), 250);
   };
 
   const handleDelete = () => {
@@ -129,7 +141,7 @@ export function TodoItem({
         hitSlop={10}
         style={styles.checkPressArea}
         accessibilityRole="checkbox"
-        accessibilityState={{ checked: task.completed }}
+        accessibilityState={{ checked: visualCompleted }}
         accessibilityLabel={task.content}
       >
         <View style={styles.circle}>
@@ -138,7 +150,7 @@ export function TodoItem({
             style={[styles.fill, fillStyle]}
           />
           <Animated.View style={[styles.check, checkStyle]}>
-            <ScribbledCheck active={task.completed} size={15} />
+            <ScribbledCheck active={visualCompleted} size={15} />
           </Animated.View>
         </View>
       </Pressable>
@@ -151,7 +163,7 @@ export function TodoItem({
           style={[
             styles.content,
             isImportant && styles.contentImportant,
-            task.completed && styles.contentDone,
+            visualCompleted && styles.contentDone,
           ]}
           numberOfLines={3}
         >

@@ -109,4 +109,17 @@ export const tasksRepo = {
     const { error } = await supabase.from(TABLE).delete().eq('id', id);
     if (error) throw error;
   },
+
+  /** Bulk-delete every completed task belonging to the current user. */
+  async deleteAllCompleted(): Promise<number> {
+    const userId = await requireUserId();
+    const { data, error } = await supabase
+      .from(TABLE)
+      .delete()
+      .eq('user_id', userId)
+      .eq('completed', true)
+      .select('id');
+    if (error) throw error;
+    return data?.length ?? 0;
+  },
 };

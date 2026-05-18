@@ -173,12 +173,19 @@ export default function DashboardScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <PaperGrain>
-        <View style={styles.headerRow}>
-          <View style={styles.headerText}>
-            <Text style={styles.title}>Dashboard</Text>
-            <Text style={styles.subtitle}>Your kept thoughts.</Text>
-          </View>
-          <View style={styles.headerActions}>
+        <View style={styles.headerWrap}>
+          {/* Meta-actions tucked top-right. Small, italic, low-contrast. */}
+          <View style={styles.metaRow}>
+            <Pressable
+              onPress={() => setSweepModalOpen(true)}
+              hitSlop={6}
+              style={({ pressed }) => [pressed && { opacity: 0.5 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Sweep older notes"
+            >
+              <Text style={styles.metaLink}>Sweep</Text>
+            </Pressable>
+            <Text style={styles.metaSeparator}>·</Text>
             <Pressable
               onPress={() => {
                 signOut().catch((e) =>
@@ -186,27 +193,22 @@ export default function DashboardScreen() {
                 );
               }}
               hitSlop={6}
-              style={({ pressed }) => [
-                styles.signOutBtn,
-                pressed && { opacity: 0.5 },
-              ]}
+              style={({ pressed }) => [pressed && { opacity: 0.5 }]}
               accessibilityRole="button"
               accessibilityLabel="Sign out"
             >
-              <Text style={styles.signOutText}>Sign out</Text>
+              <Text style={styles.metaLink}>Sign out</Text>
             </Pressable>
-            <Pressable
-              onPress={() => setSweepModalOpen(true)}
-              style={({ pressed }) => [
-                styles.sweepBtn,
-                pressed && styles.sweepBtnPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Sweep older notes"
-            >
-              <Wind size={14} color={colors.textMuted} strokeWidth={1.6} />
-              <Text style={styles.sweepText}>Sweep</Text>
-            </Pressable>
+          </View>
+
+          {/* Title row — full width, single line guaranteed. */}
+          <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit>
+            Dashboard
+          </Text>
+          <Text style={styles.subtitle}>Your kept thoughts.</Text>
+
+          {/* Primary action — its own row beneath the subtitle. */}
+          <View style={styles.primaryActionRow}>
             <Pressable
               onPress={() => setGroupModalOpen(true)}
               style={({ pressed }) => [
@@ -297,21 +299,47 @@ export default function DashboardScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.paper },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
+  headerWrap: {
     paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
-    gap: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
   },
-  headerText: { flexShrink: 1 },
-  title: { ...typography.display, color: colors.text },
+  metaRow: {
+    flexDirection: 'row',
+    alignSelf: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingBottom: spacing.sm,
+  },
+  metaLink: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    textDecorationLine: 'underline',
+  },
+  metaSeparator: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    paddingHorizontal: 2,
+  },
+  title: {
+    ...typography.display,
+    color: colors.text,
+    width: '100%',
+  },
   subtitle: {
     ...typography.body,
     color: colors.textMuted,
     marginTop: spacing.xs,
+  },
+  primaryActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
   },
   newGroupBtn: {
     flexDirection: 'row',
@@ -330,36 +358,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: colors.text,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  sweepBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-  },
-  sweepBtnPressed: { opacity: 0.55 },
-  sweepText: {
-    ...typography.body,
-    fontSize: 13,
-    color: colors.textMuted,
-    fontStyle: 'italic',
-  },
-  signOutBtn: {
-    paddingHorizontal: spacing.xs,
-    paddingVertical: spacing.sm,
-  },
-  signOutText: {
-    ...typography.body,
-    fontSize: 12,
-    color: colors.textMuted,
-    fontStyle: 'italic',
-    textDecorationLine: 'underline',
   },
   scrollContent: {
     paddingHorizontal: spacing.lg,

@@ -8,7 +8,10 @@ import { tasksRepo } from '../../db/repositories/tasks';
 import { notesRepo } from '../../db/repositories/notes';
 import type { Task, Note } from '../../db/schema';
 import { TodoSection, type AddTaskMeta } from './TodoSection';
+import { TodoItem } from './TodoItem';
 import { HandDrawnUnderline } from '../ui/HandDrawnUnderline';
+import { ArchiveCompletedModal } from './ArchiveCompletedModal';
+import { Pressable } from 'react-native';
 import {
   bucketForDueDate,
   bucketLabel,
@@ -45,6 +48,7 @@ export function TodoList() {
   const [inbox, setInbox] = useState<Task[]>([]);
   const [groups, setGroups] = useState<NoteGroup[]>([]);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   const reload = useCallback(async () => {
     const allTasks = await tasksRepo.list();
@@ -226,6 +230,9 @@ export function TodoList() {
           onAdd={handleAddInbox}
         />
         {/* Inbox tasks grouped by their due bucket. Empty buckets are hidden. */}
+        {/* Active inbox tasks grouped by due bucket. Completed tasks are
+            removed here and collected into a single "Completed" section
+            at the bottom of the list so the active workspace stays clean. */}
         {([
           'today',
           'tomorrow',
@@ -235,7 +242,8 @@ export function TodoList() {
           .map((bucket) => ({
             bucket,
             tasks: inbox.filter(
-              (t) => bucketForDueDate(t.dueDate) === bucket,
+              (t) =>
+                !t.completed && bucketForDueDate(t.dueDate) === bucket,
             ),
           }))
           .filter(({ tasks }) => tasks.length > 0)
@@ -252,19 +260,101 @@ export function TodoList() {
               hideAdder
             />
           ))}
-        {groups.map((g) => (
-          <TodoSection
-            key={g.noteId}
-            title={g.title}
-            placeholder="Add to this list"
-            tasks={g.tasks}
-            onToggle={handleToggle}
-            onDelete={handleDelete}
-            onToggleImportant={handleToggleImportant}
-            onAdd={handleAddToGroup(g.noteId)}
-          />
-        ))}
+        {/* Note-linked sub-lists, also with completed filtered out. */}
+        {groups.map((g) => {
+          const active = g.tasks.filter((t) => !t.completed);
+          return (
+            <TodoSection
+              key={g.noteId}
+              title={g.title}
+              placeholder="Add to this list"
+              tasks={active}
+              onToggle={handleToggle}
+              onDelete={handleDelete}
+              onToggleImportant={handleToggleImportant}
+              onAdd={handleAddToGroup(g.noteId)}
+            />
+          );
+        })}
+        {/* Completed: a single bucket at the very bottom. Most-recently
+            completed first; capped to the top 10 so the section stays
+            scannable; an "Archive all" link offers a clean-out. */}
+        {(() => {
+          const completed = [
+            ...inbox.filter((t) => t.completed),
+            ...groups.flatMap((g) =>
+              g.tasks.filter((t) => t.completed),
+            ),
+          ].sort(
+            (a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0),
+          );
+          if (completed.length === 0) return null;
+          const visible = completed.slice(0, 10);
+          const hiddenCount = completed.length - visible.length;
+          return (
+            <View style={styles.completedSection}>
+              <View style={styles.completedHeaderRow}>
+                <View style={styles.completedHeaderText}>
+                  <Text style={styles.completedTitle}>Completed</Text>
+                  <View style={styles.completedUnderline}>
+                    <HandDrawnUnderline />
+                  </View>
+                </View>
+                <Pressable
+                  onPress={() => setArchiveOpen(true)}
+                  hitSlop={8}
+                  style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Archive all completed tasks"
+                >
+                  <Text style={styles.archiveLink}>Archive all</Text>
+                </Pressable>
+              </View>
+              {visible.map((task) => (
+                <TodoItem
+                  key={task.id}
+                  task={task}
+                  onToggle={handleToggle}
+                  onDelete={handleDelete}
+                  onToggleImportant={handleToggleImportant}
+                />
+              ))}
+              {hiddenCount > 0 ? (
+                <Text style={styles.moreHint}>
+                  +{hiddenCount} more completed
+                </Text>
+              ) : null}
+            </View>
+          );
+        })()}
       </ScrollView>
+
+      <ArchiveCompletedModal
+        visible={archiveOpen}
+        count={[
+          ...inbox.filter((t) => t.completed),
+          ...groups.flatMap((g) => g.tasks.filter((t) => t.completed)),
+        ].length}
+        onClose={() => setArchiveOpen(false)}
+        onConfirm={async () => {
+          // Optimistically remove from local state, then bulk-delete on server.
+          setInbox((prev) => prev.filter((t) => !t.completed));
+          setGroups((prev) =>
+            prev
+              .map((g) => ({
+                ...g,
+                tasks: g.tasks.filter((t) => !t.completed),
+              }))
+              .filter((g) => g.tasks.length > 0),
+          );
+          try {
+            await tasksRepo.deleteAllCompleted();
+          } catch (e) {
+            console.error('[tasks] archive failed:', e);
+            reload();
+          }
+        }}
+      />
     </View>
   );
 }
@@ -317,6 +407,48 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textDecorationLine: 'underline',
     marginTop: 4,
+  },
+  completedSection: {
+    paddingVertical: spacing.sm,
+    paddingTop: spacing.md,
+  },
+  completedHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
+    gap: spacing.md,
+  },
+  completedHeaderText: { flexShrink: 1 },
+  completedTitle: {
+    ...typography.title,
+    fontStyle: 'italic',
+    fontSize: 18,
+    lineHeight: 24,
+    color: colors.text,
+  },
+  completedUnderline: {
+    marginTop: 2,
+    width: 60,
+  },
+  archiveLink: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    textDecorationLine: 'underline',
+    paddingBottom: 4,
+  },
+  moreHint: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
   },
   scroll: {
     flex: 1,
