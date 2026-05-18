@@ -87,6 +87,26 @@ export async function signInWithEmail(email: string, password: string) {
   return data;
 }
 
+/**
+ * Re-trigger the signup confirmation email. Use this when a user signed up
+ * but the link expired (OTP timeout) or never arrived. Same emailRedirectTo
+ * logic as signup so the fresh link points back at the current origin.
+ */
+export async function resendConfirmationEmail(email: string) {
+  const emailRedirectTo =
+    Platform.OS === 'web' &&
+    typeof window !== 'undefined' &&
+    window.location?.origin
+      ? window.location.origin
+      : undefined;
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+    ...(emailRedirectTo ? { options: { emailRedirectTo } } : {}),
+  });
+  if (error) throw error;
+}
+
 export async function signOut(): Promise<void> {
   cachedUserId = null;
   const { error } = await supabase.auth.signOut();

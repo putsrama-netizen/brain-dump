@@ -15,6 +15,7 @@ import { spacing, radius, shadows } from '../../theme/spacing';
 import { PaperGrain } from '../ui/PaperGrain';
 import { HandDrawnUnderline } from '../ui/HandDrawnUnderline';
 import {
+  resendConfirmationEmail,
   signInWithEmail,
   signUpWithEmail,
 } from '../../lib/supabase';
@@ -44,6 +45,12 @@ export function SignInScreen() {
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Set to the just-signed-up email when confirmation is pending so we can
+  // surface a "Resend the email" link if the user never got the first one.
+  const [pendingConfirmEmail, setPendingConfirmEmail] = useState<string | null>(
+    null,
+  );
+  const [resending, setResending] = useState(false);
 
   const canSubmit =
     !submitting && email.trim().length > 0 && password.length > 0;
@@ -52,6 +59,21 @@ export function SignInScreen() {
     setMode((m) => (m === 'signIn' ? 'signUp' : 'signIn'));
     setError(null);
     setInfo(null);
+    setPendingConfirmEmail(null);
+  };
+
+  const handleResend = async () => {
+    if (!pendingConfirmEmail || resending) return;
+    setResending(true);
+    setError(null);
+    try {
+      await resendConfirmationEmail(pendingConfirmEmail);
+      setInfo(`Sent another link to ${pendingConfirmEmail}.`);
+    } catch (e) {
+      setError(formatAuthError(e));
+    } finally {
+      setResending(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -67,6 +89,7 @@ export function SignInScreen() {
           setInfo(
             'Almost there. Check your inbox for a confirmation link, then come back and sign in.',
           );
+          setPendingConfirmEmail(email.trim());
         }
         // If session was returned (confirmation off), the auth listener
         // in _layout.tsx swaps to the app automatically.
@@ -156,6 +179,22 @@ export function SignInScreen() {
 
               {error ? <Text style={styles.errorText}>{error}</Text> : null}
               {info ? <Text style={styles.infoText}>{info}</Text> : null}
+              {pendingConfirmEmail ? (
+                <Pressable
+                  onPress={handleResend}
+                  hitSlop={6}
+                  disabled={resending}
+                  style={({ pressed }) => [
+                    styles.resendBtn,
+                    pressed && { opacity: 0.6 },
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.resendText}>
+                    {resending ? 'Sending…' : 'Resend the email'}
+                  </Text>
+                </Pressable>
+              ) : null}
 
               <Pressable
                 onPress={switchMode}
@@ -264,6 +303,17 @@ const styles = StyleSheet.create({
     ...typography.body,
     fontSize: 13,
     color: colors.textMuted,
+    fontStyle: 'italic',
+    textDecorationLine: 'underline',
+  },
+  resendBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.xs,
+  },
+  resendText: {
+    ...typography.body,
+    fontSize: 13,
+    color: colors.text,
     fontStyle: 'italic',
     textDecorationLine: 'underline',
   },
