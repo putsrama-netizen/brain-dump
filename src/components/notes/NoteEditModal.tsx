@@ -123,24 +123,6 @@ export function NoteEditModal({
     }
   };
 
-  const handleToggleStepImportant = async (id: string) => {
-    let nextValue = false;
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id !== id) return t;
-        nextValue = !t.isImportant;
-        return { ...t, isImportant: nextValue };
-      }),
-    );
-    setTasksDirty(true);
-    try {
-      await tasksRepo.setImportant(id, nextValue);
-    } catch (e) {
-      console.error('[edit] toggle important failed:', e);
-      if (note) reloadTasks(note.id);
-    }
-  };
-
   const handleToggleStep = async (id: string) => {
     setTasks((prev) =>
       prev.map((t) =>
@@ -269,7 +251,6 @@ export function NoteEditModal({
                     task={task}
                     onToggle={handleToggleStep}
                     onDelete={handleDeleteStep}
-                    onToggleImportant={handleToggleStepImportant}
                   />
                 ))
               )}

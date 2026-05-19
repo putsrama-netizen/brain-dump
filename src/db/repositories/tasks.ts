@@ -1,8 +1,15 @@
 import { nanoid } from 'nanoid/non-secure';
 import { supabase, requireUserId, camelRows } from '../../lib/supabase';
 import type { Task } from '../schema';
+import { SOMEDAY_SENTINEL } from '../../lib/dueDate';
 
 const TABLE = 'tasks';
+
+function startOfToday(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
 
 export const tasksRepo = {
   async list(): Promise<Task[]> {
@@ -108,6 +115,25 @@ export const tasksRepo = {
   async delete(id: string): Promise<void> {
     const { error } = await supabase.from(TABLE).delete().eq('id', id);
     if (error) throw error;
+  },
+
+  // Zero-guilt rollover: any past-due active task is silently bumped to the
+  // start of today so it shows up as "Today" instead of accumulating as
+  // overdue. Skips SOMEDAY sentinel and tasks already due today/future.
+  // No-op when nothing matches.
+  async rollForwardOverdue(): Promise<number> {
+    const userId = await requireUserId();
+    const today = startOfToday();
+    const { data, error } = await supabase
+      .from(TABLE)
+      .update({ due_date: today })
+      .eq('user_id', userId)
+      .eq('completed', false)
+      .lt('due_date', today)
+      .neq('due_date', SOMEDAY_SENTINEL)
+      .select('id');
+    if (error) throw error;
+    return data?.length ?? 0;
   },
 
   /** Bulk-delete every completed task belonging to the current user. */

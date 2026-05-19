@@ -12,11 +12,6 @@ import { TodoItem } from './TodoItem';
 import { HandDrawnUnderline } from '../ui/HandDrawnUnderline';
 import { ArchiveCompletedModal } from './ArchiveCompletedModal';
 import { Pressable } from 'react-native';
-import {
-  bucketForDueDate,
-  bucketLabel,
-  type DueBucket,
-} from '../../lib/dueDate';
 
 type NoteGroup = {
   noteId: string;
@@ -51,6 +46,15 @@ export function TodoList() {
   const [archiveOpen, setArchiveOpen] = useState(false);
 
   const reload = useCallback(async () => {
+    // Zero-guilt: silently bump any overdue active tasks to today before
+    // rendering, so the list never carries a visible "overdue" backlog.
+    // Failure here is non-fatal — the display-time rollover in dueLabel()
+    // still keeps anything past reading as "Today".
+    try {
+      await tasksRepo.rollForwardOverdue();
+    } catch (e) {
+      console.error('[tasks] rollForwardOverdue failed:', e);
+    }
     const allTasks = await tasksRepo.list();
     const inboxTasks: Task[] = [];
     const byNote = new Map<string, Task[]>();
@@ -124,43 +128,12 @@ export function TodoList() {
     }
   };
 
-  const handleToggleImportant = async (id: string) => {
-    let nextValue = false;
-    const flip = (t: Task): Task => {
-      if (t.id !== id) return t;
-      nextValue = !t.isImportant;
-      return { ...t, isImportant: nextValue };
-    };
-    setInbox((prev) => prev.map(flip));
-    setGroups((prev) =>
-      prev.map((g) => ({ ...g, tasks: g.tasks.map(flip) })),
-    );
-    try {
-      await tasksRepo.setImportant(id, nextValue);
-    } catch {
-      reload();
-    }
-  };
-
   const surfaceError = useCallback((label: string, e: unknown) => {
     const msg = formatError(e);
     console.error(`[tasks] ${label}:`, e);
     setErrorBanner(`${label}: ${msg}`);
     Alert.alert('Add task failed', msg);
   }, []);
-
-  const handleAddInbox = async (content: string, meta: AddTaskMeta) => {
-    setErrorBanner(null);
-    try {
-      const created = await tasksRepo.create(content, {
-        dueDate: meta.dueDate,
-        isImportant: meta.isImportant,
-      });
-      setInbox((prev) => [...prev, created]);
-    } catch (e) {
-      surfaceError('add inbox failed', e);
-    }
-  };
 
   const handleAddToGroup =
     (noteId: string) => async (content: string, meta: AddTaskMeta) => {
@@ -218,49 +191,9 @@ export function TodoList() {
             Nothing yet. Add the first thing below.
           </Text>
         ) : null}
-        {/* Single add row at the top of the inbox; the picker on this row
-            decides which bucket the new task falls into. */}
-        <TodoSection
-          title={null}
-          placeholder="Add a task"
-          tasks={[]}
-          onToggle={handleToggle}
-          onDelete={handleDelete}
-          onToggleImportant={handleToggleImportant}
-          onAdd={handleAddInbox}
-        />
-        {/* Inbox tasks grouped by their due bucket. Empty buckets are hidden. */}
-        {/* Active inbox tasks grouped by due bucket. Completed tasks are
-            removed here and collected into a single "Completed" section
-            at the bottom of the list so the active workspace stays clean. */}
-        {([
-          'today',
-          'tomorrow',
-          'someday',
-          null,
-        ] as (DueBucket | null)[])
-          .map((bucket) => ({
-            bucket,
-            tasks: inbox.filter(
-              (t) =>
-                !t.completed && bucketForDueDate(t.dueDate) === bucket,
-            ),
-          }))
-          .filter(({ tasks }) => tasks.length > 0)
-          .map(({ bucket, tasks }) => (
-            <TodoSection
-              key={bucket ?? 'anytime'}
-              title={bucketLabel(bucket)}
-              placeholder=""
-              tasks={tasks}
-              onToggle={handleToggle}
-              onDelete={handleDelete}
-              onToggleImportant={handleToggleImportant}
-              onAdd={() => {}}
-              hideAdder
-            />
-          ))}
-        {/* Note-linked sub-lists, also with completed filtered out. */}
+        {/* Action Steps are anchored to the notes you kept — no free-floating
+            inbox, no bucket sub-sections. Completed items collect into the
+            single section at the bottom. */}
         {groups.map((g) => {
           const active = g.tasks.filter((t) => !t.completed);
           return (
@@ -271,7 +204,6 @@ export function TodoList() {
               tasks={active}
               onToggle={handleToggle}
               onDelete={handleDelete}
-              onToggleImportant={handleToggleImportant}
               onAdd={handleAddToGroup(g.noteId)}
             />
           );
@@ -316,7 +248,6 @@ export function TodoList() {
                   task={task}
                   onToggle={handleToggle}
                   onDelete={handleDelete}
-                  onToggleImportant={handleToggleImportant}
                 />
               ))}
               {hiddenCount > 0 ? (

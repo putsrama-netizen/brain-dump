@@ -26,8 +26,8 @@ export default function TasksScreen() {
           style={styles.flex}
         >
           <View style={styles.header}>
-            <Text style={styles.title}>Tasks</Text>
-            <Text style={styles.subtitle}>Where notes become action.</Text>
+            <Text style={styles.title}>Focus</Text>
+            <Text style={styles.subtitle}>Small steps tied to what you kept.</Text>
           </View>
           <RitualsRow />
           <TodoList />

@@ -42,7 +42,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="tasks"
         options={{
-          title: 'Tasks',
+          title: 'Focus',
           tabBarIcon: ({ color, size }) => <CheckSquare size={size} color={color} strokeWidth={1.6} />,
         }}
       />

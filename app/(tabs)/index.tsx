@@ -35,16 +35,15 @@ import { spacing, radius } from '../../src/theme/spacing';
 import { notesRepo } from '../../src/db/repositories/notes';
 import { promptsRepo } from '../../src/db/repositories/prompts';
 import { promptAnalyticsRepo } from '../../src/db/repositories/promptAnalytics';
-import { currentSlot } from '../../src/lib/timeSlot';
 import { haptics } from '../../src/hooks/useHaptics';
 import { ResurfaceModal } from '../../src/components/resurface/ResurfaceModal';
 import type { Note, Prompt } from '../../src/db/schema';
 
 const INPUT_ACCESSORY_ID = 'voidKeyboardAccessory';
 
-// Local fallback pool. Used when the server returns 0 prompts for the current
-// slot (e.g. seed SQL never ran on this Supabase project). Keeps the input
-// area from feeling sterile while we surface a diagnostic.
+// Local fallback pool. Used when the wellness pool comes back empty (e.g.
+// the seed SQL hasn't been run on this Supabase project). Lean Release / Body
+// / Evening so the "(stuck?)" surface stays on-message even offline.
 const FALLBACK_PROMPTS: { id: string; text: string }[] = [
   { id: '_fallback_a', text: "What's loud right now?" },
   { id: '_fallback_b', text: 'Anything sitting on your chest?' },
@@ -106,22 +105,20 @@ function DismissOnBackgroundTap({
   );
 }
 
-// Toss animation — applied directly to the input wrapper as Reanimated transforms.
-// We dropped the ViewShot snapshot approach because captureRef() returns a blank
-// PNG against an autofocused iOS TextInput, which is why the toss animation was
-// invisible regardless of z-order fixes.
-const CRUMPLE_MS = 720;
-const TOSS_MS = 520;
-const LAND_MS = 200;
+// Toss animation — physical text-shredder feel rather than the old crumple+arc.
+// The input compresses vertically into a thin strip (feed-through), then the
+// strip falls straight down and fades out. No bin arc — the shredder sits in
+// place of the input. We dropped the ViewShot snapshot approach because
+// captureRef() returns a blank PNG against an autofocused iOS TextInput.
+const FEED_MS = 220;
+const SHRED_MS = 520;
+const FALL_MS = 360;
 
 export default function VoidScreen() {
   const [text, setText] = useState('');
   const [resetKey, setResetKey] = useState(0);
   const [pendingTossId, setPendingTossId] = useState<string | null>(null);
   const [animating, setAnimating] = useState(false);
-  const [binCenter, setBinCenter] = useState<{ x: number; y: number } | null>(
-    null,
-  );
 
   // --- Prompt engine state ----------------------------------------------
   // currentPrompt holds either a real Prompt row OR a tagged fallback object.
@@ -140,16 +137,14 @@ export default function VoidScreen() {
   const [resurfaceNote, setResurfaceNote] = useState<Note | null>(null);
 
   const binRef = useRef<BinIconHandle>(null);
-  const binWrapRef = useRef<View>(null);
-  const canvasRef = useRef<View>(null);
   const pendingNoteRef = useRef<Note | null>(null);
   const tabBarHeight = useBottomTabBarHeight();
   const router = useRouter();
 
-  // Reanimated shared values for the crumple+toss.
-  const scale = useSharedValue(1);
-  const rotate = useSharedValue(0);
-  const skewX = useSharedValue(0);
+  // Reanimated shared values for the shred animation. scaleY drives the
+  // vertical compression; ty drives the fall after the strip is formed.
+  const scaleY = useSharedValue(1);
+  const scaleX = useSharedValue(1);
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
   const opacity = useSharedValue(1);
@@ -159,38 +154,18 @@ export default function VoidScreen() {
     transform: [
       { translateX: tx.value },
       { translateY: ty.value },
-      { scale: scale.value },
-      { rotate: `${rotate.value}deg` },
-      { skewX: `${skewX.value}deg` },
+      { scaleX: scaleX.value },
+      { scaleY: scaleY.value },
     ],
   }));
 
   const resetAnim = useCallback(() => {
-    scale.value = 1;
-    rotate.value = 0;
-    skewX.value = 0;
+    scaleY.value = 1;
+    scaleX.value = 1;
     tx.value = 0;
     ty.value = 0;
     opacity.value = 1;
-  }, [scale, rotate, skewX, tx, ty, opacity]);
-
-  const measureBin = useCallback(() => {
-    if (!binWrapRef.current) return;
-    binWrapRef.current.measureInWindow((x, y, width, height) => {
-      setBinCenter({ x: x + width / 2, y: y + height / 2 });
-    });
-  }, []);
-
-  const measureCanvasCenter = (): Promise<{ x: number; y: number }> =>
-    new Promise((resolve) => {
-      if (!canvasRef.current) {
-        resolve({ x: 0, y: 0 });
-        return;
-      }
-      canvasRef.current.measureInWindow((x, y, width, height) => {
-        resolve({ x: x + width / 2, y: y + height / 2 });
-      });
-    });
+  }, [scaleY, scaleX, tx, ty, opacity]);
 
   const dismissKeyboard = useCallback(() => {
     Keyboard.dismiss();
@@ -219,22 +194,24 @@ export default function VoidScreen() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const slot = currentSlot();
       try {
-        const [slotPrompts, shownIds] = await Promise.all([
-          promptsRepo.listBySlot(slot),
+        // Wellness pivot: pull from Release + Body + Evening categories rather
+        // than the legacy time-of-day slot, so the "(stuck?)" prompt always
+        // points at letting-go / body / day-close rather than productivity.
+        const [pool, shownIds] = await Promise.all([
+          promptsRepo.listWellnessPool(),
           promptAnalyticsRepo.listShownPromptIds(7),
         ]);
         if (cancelled) return;
         const shownSet = new Set(shownIds);
-        let eligible = slotPrompts.filter((p) => !shownSet.has(p.id));
-        if (eligible.length === 0) eligible = slotPrompts;
+        let eligible = pool.filter((p) => !shownSet.has(p.id));
+        if (eligible.length === 0) eligible = pool;
         eligiblePool.current = eligible;
         if (eligible.length === 0) {
           // DB returned zero prompts — surface a diagnostic so the user
           // knows the seed SQL hasn't been run. Fallback pool still works.
           setPromptDiagnostic(
-            `No prompts found in Supabase for slot "${slot}". Run supabase/prompts.sql.`,
+            'No wellness prompts found in Supabase. Run supabase/prompts.sql.',
           );
           return;
         }
@@ -279,60 +256,58 @@ export default function VoidScreen() {
     }
   }, []);
 
-  const runTossAnim = (dx: number, dy: number, onDone: () => void) => {
-    const arcLift = -Math.max(140, Math.abs(dx) * 0.3);
-
+  const runShredAnim = (onDone: () => void) => {
     haptics.tear();
 
-    // Phase 1: crumple (720ms) — deep compression with wrinkle oscillation.
-    scale.value = withTiming(0.30, {
-      duration: CRUMPLE_MS,
-      easing: Easing.bezier(0.4, 0, 0.2, 1),
+    // Phase 1: feed-in (220ms) — paper is drawn down into the shredder.
+    // A tiny downward translation + a touch of widening sells the "pulled in".
+    ty.value = withTiming(12, {
+      duration: FEED_MS,
+      easing: Easing.in(Easing.quad),
     });
-    rotate.value = withTiming(-28, { duration: CRUMPLE_MS });
-    skewX.value = withSequence(
-      withTiming(14, { duration: 180 }),
-      withTiming(-12, { duration: 180 }),
-      withTiming(8, { duration: 180 }),
-      withTiming(0, { duration: 180 }),
-    );
-    setTimeout(() => haptics.crumple(), 240);
-    setTimeout(() => haptics.crumple(), 480);
-    setTimeout(() => haptics.crumple(), 660);
+    scaleX.value = withTiming(1.02, { duration: FEED_MS });
 
-    // Phase 2: toss (520ms, starting at 720ms) — arc to bin.
-    tx.value = withDelay(
-      CRUMPLE_MS,
-      withTiming(dx, { duration: TOSS_MS, easing: Easing.linear }),
+    // Phase 2: shred (520ms, starting at FEED_MS) — vertical compression to
+    // a thin strip, with subtle horizontal jitter to evoke teeth biting.
+    scaleY.value = withDelay(
+      FEED_MS,
+      withTiming(0.04, {
+        duration: SHRED_MS,
+        easing: Easing.bezier(0.55, 0, 0.5, 1),
+      }),
     );
-    ty.value = withDelay(
-      CRUMPLE_MS,
+    scaleX.value = withDelay(
+      FEED_MS,
+      withTiming(1.08, { duration: SHRED_MS }),
+    );
+    tx.value = withDelay(
+      FEED_MS,
       withSequence(
-        withTiming(arcLift, { duration: 230, easing: Easing.out(Easing.quad) }),
-        withTiming(dy, { duration: 290, easing: Easing.in(Easing.quad) }),
+        withTiming(-2, { duration: 110 }),
+        withTiming(2, { duration: 110 }),
+        withTiming(-1.5, { duration: 110 }),
+        withTiming(0, { duration: 190 }),
       ),
     );
-    rotate.value = withDelay(
-      CRUMPLE_MS,
-      withTiming(-360, { duration: TOSS_MS }),
-    );
-    scale.value = withDelay(
-      CRUMPLE_MS,
-      withTiming(0.10, { duration: TOSS_MS }),
-    );
+    setTimeout(() => haptics.crumple(), FEED_MS + 110);
+    setTimeout(() => haptics.crumple(), FEED_MS + 320);
 
-    // Phase 3: land (200ms) — fade out and (via setTimeout, not the withTiming
-    // completion callback) fire onDone. Reanimated's `finished` callback is
-    // unreliable on web; setTimeout is cross-platform stable.
+    // Phase 3: fall (360ms) — the strip drops straight down and fades.
+    ty.value = withDelay(
+      FEED_MS + SHRED_MS,
+      withTiming(260, {
+        duration: FALL_MS,
+        easing: Easing.in(Easing.cubic),
+      }),
+    );
     opacity.value = withDelay(
-      CRUMPLE_MS + TOSS_MS,
-      withTiming(0, { duration: LAND_MS }),
+      FEED_MS + SHRED_MS,
+      withTiming(0, { duration: FALL_MS }),
     );
     setTimeout(() => {
-      haptics.crumple();
       haptics.check();
       onDone();
-    }, CRUMPLE_MS + TOSS_MS + LAND_MS);
+    }, FEED_MS + SHRED_MS + FALL_MS);
   };
 
   const handleToss = async () => {
@@ -346,13 +321,6 @@ export default function VoidScreen() {
 
     setAnimating(true);
     Keyboard.dismiss();
-
-    // Measure synchronously-ish (just rAF + measureInWindow callbacks).
-    measureBin();
-    const center = await measureCanvasCenter();
-    const target = binCenter ?? { x: center.x, y: center.y + 240 };
-    const dx = target.x - center.x;
-    const dy = target.y - center.y;
 
     // Fire Supabase save in the BACKGROUND. Do not await — a hung/slow
     // request must not stop the visual flow. Schedule hard-delete once the
@@ -371,10 +339,10 @@ export default function VoidScreen() {
         console.error('[toss] supabase failed:', e);
       });
 
-    // Run the animation immediately. onDone fires via setTimeout so it
-    // doesn't depend on Reanimated's `finished` callback (unreliable on web)
-    // or on the Supabase call completing.
-    runTossAnim(dx, dy, () => {
+    // Run the shred immediately. onDone fires via setTimeout so it doesn't
+    // depend on Reanimated's `finished` callback (unreliable on web) or on
+    // the Supabase call completing.
+    runShredAnim(() => {
       binRef.current?.bounce();
       setText('');
       resetAnim();
@@ -446,13 +414,12 @@ export default function VoidScreen() {
       await notesRepo.restore(pendingTossId);
     }
     haptics.tap();
-    // Reverse the toss: bring the ball back, then un-crumple.
-    tx.value = withTiming(0, { duration: 350, easing: Easing.out(Easing.cubic) });
-    ty.value = withTiming(0, { duration: 350, easing: Easing.out(Easing.cubic) });
-    opacity.value = withTiming(1, { duration: 350 });
-    rotate.value = withTiming(0, { duration: 350 });
-    scale.value = withDelay(350, withTiming(1, { duration: 400 }));
-    skewX.value = withDelay(350, withTiming(0, { duration: 200 }));
+    // Reverse the shred: bring the strip back up, then expand it.
+    ty.value = withTiming(0, { duration: 320, easing: Easing.out(Easing.cubic) });
+    opacity.value = withTiming(1, { duration: 320 });
+    scaleY.value = withDelay(320, withTiming(1, { duration: 360 }));
+    scaleX.value = withDelay(320, withTiming(1, { duration: 280 }));
+    tx.value = withTiming(0, { duration: 200 });
     setPendingTossId(null);
     pendingNoteRef.current = null;
   };
@@ -507,7 +474,7 @@ export default function VoidScreen() {
                 ) : null}
               </View>
 
-              <View ref={canvasRef} style={styles.canvas} collapsable={false}>
+              <View style={styles.canvas} collapsable={false}>
                 <Animated.View
                   key={resetKey}
                   style={[styles.crumpleHost, animatedStyle]}
@@ -571,11 +538,7 @@ export default function VoidScreen() {
                   <Text style={[styles.btnText, styles.keepText]}>Keep</Text>
                 </Pressable>
 
-                <View
-                  ref={binWrapRef}
-                  collapsable={false}
-                  onLayout={measureBin}
-                >
+                <View collapsable={false}>
                   <BinIcon ref={binRef} />
                 </View>
 

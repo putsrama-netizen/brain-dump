@@ -14,31 +14,24 @@ import { spacing } from '../../theme/spacing';
 import { haptics } from '../../hooks/useHaptics';
 import { withAlpha } from '../rituals/palette';
 import { dueLabel } from '../../lib/dueDate';
-import { ScribbleStar } from '../ui/ScribbleStar';
 import { ScribbledCheck } from '../ui/ScribbledCheck';
+import { ScribbleCrossOut } from '../ui/ScribbleCrossOut';
 import type { Task } from '../../db/schema';
 
 type Props = {
   task: Task;
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
-  onToggleImportant: (id: string) => void;
 };
 
 const CIRCLE = 22;
-const STAR = 20;
 
-export function TodoItem({
-  task,
-  onToggle,
-  onDelete,
-  onToggleImportant,
-}: Props) {
+export function TodoItem({ task, onToggle, onDelete }: Props) {
   const [deleting, setDeleting] = useState(false);
-  // Local "visual completed" state. Flips immediately on tap so the
-  // strikethrough animation plays in place; the parent is notified after a
-  // short delay so re-bucketing into the Completed section doesn't snap the
-  // task mid-animation. Synced back to the prop on external changes.
+  // Local "visual completed" state. Flips immediately on tap so the cross-out
+  // + opacity animation plays in place; the parent is notified after a short
+  // delay so re-bucketing into the Completed section doesn't snap the task
+  // mid-animation. Synced back to the prop on external changes.
   const [visualCompleted, setVisualCompleted] = useState(task.completed);
   useEffect(() => {
     setVisualCompleted(task.completed);
@@ -84,9 +77,6 @@ export function TodoItem({
   const handleToggle = () => {
     if (deleting) return;
     haptics.tap();
-    // Flip visual instantly so the strikethrough + opacity animation runs
-    // in place. Delay the parent onToggle by ~250ms so re-bucketing into the
-    // Completed section happens after the user sees the check fill.
     setVisualCompleted((prev) => !prev);
     setTimeout(() => onToggle(task.id), 250);
   };
@@ -105,37 +95,10 @@ export function TodoItem({
     );
   };
 
-  const handleToggleStar = () => {
-    if (deleting) return;
-    haptics.tap();
-    onToggleImportant(task.id);
-  };
-
   const label = dueLabel(task.dueDate);
-  const isImportant = task.isImportant;
 
   return (
-    <Animated.View
-      style={[
-        styles.row,
-        isImportant && styles.rowImportant,
-        rowStyle,
-      ]}
-    >
-      <Pressable
-        onPress={handleToggleStar}
-        hitSlop={6}
-        style={({ pressed }) => [
-          styles.starPressArea,
-          pressed && { opacity: 0.6 },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={
-          isImportant ? 'Unmark important' : 'Mark important'
-        }
-      >
-        <ScribbleStar active={isImportant} size={STAR} />
-      </Pressable>
+    <Animated.View style={[styles.row, rowStyle]}>
       <Pressable
         onPress={handleToggle}
         hitSlop={10}
@@ -159,19 +122,15 @@ export function TodoItem({
         style={styles.textPressArea}
         accessibilityRole="button"
       >
-        <Text
-          style={[
-            styles.content,
-            isImportant && styles.contentImportant,
-            visualCompleted && styles.contentDone,
-          ]}
-          numberOfLines={3}
-        >
-          {task.content}
-          {label ? (
-            <Text style={styles.dueLabel}> • {label}</Text>
-          ) : null}
-        </Text>
+        <View style={styles.textWithCrossOut}>
+          <Text style={styles.content} numberOfLines={3}>
+            {task.content}
+            {label ? (
+              <Text style={styles.dueLabel}> • {label}</Text>
+            ) : null}
+          </Text>
+          <ScribbleCrossOut active={visualCompleted} />
+        </View>
       </Pressable>
       <Pressable
         onPress={handleDelete}
@@ -195,15 +154,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xl,
-    gap: spacing.sm,
-  },
-  rowImportant: {
-    backgroundColor: withAlpha(colors.sage, 0.14),
-  },
-  starPressArea: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 2,
+    gap: spacing.md,
   },
   checkPressArea: {
     alignItems: 'center',
@@ -231,19 +182,15 @@ const styles = StyleSheet.create({
   },
   textPressArea: {
     flex: 1,
-    paddingLeft: spacing.xs,
+  },
+  textWithCrossOut: {
+    position: 'relative',
   },
   content: {
     ...typography.input,
     fontSize: 16,
     lineHeight: 22,
     color: colors.text,
-  },
-  contentDone: {
-    textDecorationLine: 'line-through',
-  },
-  contentImportant: {
-    fontWeight: '600',
   },
   dueLabel: {
     color: colors.textMuted,

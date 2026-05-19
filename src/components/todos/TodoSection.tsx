@@ -24,7 +24,6 @@ type Props = {
   tasks: Task[];
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
-  onToggleImportant: (id: string) => void;
   onAdd: (content: string, meta: AddTaskMeta) => void;
   // For inbox bucket sub-sections: render the items only, no add input row.
   hideAdder?: boolean;
@@ -44,7 +43,6 @@ export function TodoSection({
   tasks,
   onToggle,
   onDelete,
-  onToggleImportant,
   onAdd,
   hideAdder = false,
 }: Props) {
@@ -82,7 +80,6 @@ export function TodoSection({
           task={task}
           onToggle={onToggle}
           onDelete={onDelete}
-          onToggleImportant={onToggleImportant}
         />
       ))}
       {hideAdder ? null : (
